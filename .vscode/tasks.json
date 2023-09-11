@@ -6,7 +6,7 @@
         {
             "label": "x16-build-and-run",
             "type": "shell",
-            "command": "/usr/local/bin/cl65 -t cx16 -l ${workspaceFolder}/build/main.lst -o ${workspaceFolder}/build/main.prg -u __EXEHDR__ ${workspaceFolder}/${relativeFile} && /usr/local/bin/x16emu -scale 4 -prg ${workspaceFolder}/build/main.prg -run -debug",
+            "command": "/usr/local/bin/cl65 -t cx16 -l ${workspaceFolder}/build/main.lst -o ${workspaceFolder}/build/main.prg -u __EXEHDR__ ${workspaceFolder}/${relativeFile} && /Applications/CommanderX16/x16emu -scale 2 -prg ${workspaceFolder}/build/main.prg -run -debug",
             "args": [],
             "group": {
                 "kind": "build",
