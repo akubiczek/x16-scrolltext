@@ -1,10 +1,11 @@
+.include "vera.inc"
+.include "macros.asm"
+
 .segment "INIT"
 .segment "ONCE"
 .segment "ZEROPAGE"
 message_pointer:    .addr $0000
 h_scroll:           .byte $00
-should_shift:       .byte $00
-int_line:           .byte $00
 
 .segment "DATA"
 message:
@@ -12,143 +13,172 @@ message:
         .charmap $41 + i, $41 + i - $40
     .endrepeat
 
-    .asciiz "X   X                                      THIS IS NOT COMMODORE 64, THIS IS COMMANDER X16. MODERN, YET 8-BIT COMPUTER!                                                                            "
+    .asciiz "                                                                              THIS IS NOT COMMODORE 64, THIS IS COMMANDER X16. MODERN, YET 8-BIT COMPUTER!                                                                                "
 
 default_irq_handler: .addr $0000
 
-ADDRx_L = $9f20
-ADDRx_M = $9f21
-ADDRx_H = $9f22
-VDATA_0 = $9f23
+SCROLL_STEP = $02 ; number of characters (must be even number)
+IRQ_LINE = $D6
 
 .segment "CODE"
 
     jsr reset_text_pointer
+    jsr set_colors_of_offscreen_chars
     jsr copy_text_to_screen
-
     stz h_scroll
-    stz should_shift
-
     jsr set_custom_irq_handler
     rts ; exit to basic
 
 ; ----------------------------------------------- ;
 set_custom_irq_handler:
-    ; set my handler
     sei
+
+    ; preserve_default_irq
+    lda $0314
+    sta default_irq_handler
+    lda $0315
+    sta default_irq_handler+1    
+
+    ; set my handler
     lda #<custom_irq_handler
     sta $0314
     lda #>custom_irq_handler
     sta $0315
 
     ; enable LINE and VSYNC interrupt
-    lda #%00000011 ; set LINE and VSYNC bits in IEN register
-    sta $9F26    
+    lda #%00000010 ; set LINE and VSYNC bits in IEN register
+    sta VERA::IEN    
 
     ; set interrupt to line $1D6
-    lda #$D6
-    sta $9F28 ;IRQLINE_L (Write only)
-    lda $9F26 
-    ora #%10000000  
-    sta $9F26 ;IRQLINE_H (bit 8)
+    set_line_int IRQ_LINE, $01
 
     cli
     rts
 
 ; ----------------------------------------------- ;
 custom_irq_handler:
-    lda $9F27
-    and #%00000001 ; sets zero-flag when bit 0 at $9F27 is cleared (not VSYNC interrupt)
-    bne vsync_interrupt
+    lda VERA::SCANLINE_L
+    cmp #IRQ_LINE
+    bne odd_interrupt ; branch if it's not the line $1D6 
 
     jsr scroll_text
 
     lda #%00000010 ; clear LINE interrupt status
-    sta $9F27
+    sta VERA::ISR
 
-    ply
-    plx
-    pla
-    rti
+    ; swap interrupt to another line
+    set_line_int $DF, $01
+
+    jmp (default_irq_handler)
+
 
 ; ----------------------------------------------- ;
-vsync_interrupt:
-    stz $9F37 ; reset H-SCROLL
+odd_interrupt:
+    lda #$00
+    stz VERA::L1_HSCROLL_L ; reset screen scroll
 
-    lda should_shift
-    cmp #$ff
+    lda h_scroll
+    cmp #$08 * SCROLL_STEP
     bne @skip_shift_chars
+
     jsr shift_characters
 
 @skip_shift_chars:
 
-    lda #%00000001 ; clear VSYNC interrupt status
-    sta $9F27
+    lda #%00000010 ; clear LINE interrupt status
+    sta VERA::ISR
 
-    ply
-    plx
-    pla
-    rti 
+    ; swap interrupt to another line
+    set_line_int IRQ_LINE, $01
 
+    rti2 ; return from interrupt procedure
+
+
+; ----------------------------------------------- ;
 scroll_text:
     lda h_scroll
-    cmp #$08
+    cmp #$08 * SCROLL_STEP
     bne @skip
-    lda #$ff
-    sta should_shift
     stz h_scroll
+    stz VERA::L1_HSCROLL_L
     rts
 @skip:
     inc
+    inc
     sta h_scroll
-    sta $9F37 ;scroll screen 
+    sta VERA::L1_HSCROLL_L ;scroll screen 
     rts
 
-; shifts characters by one to the left, and resets h_scroll
+
+; ----------------------------------------------- ;
+; shifts characters by one to the left
 shift_characters:
-    stz should_shift
     jsr increase_text_pointer
     jsr copy_text_to_screen
     rts
 
 increase_text_pointer:
-    lda message_pointer
-    inc
-    sta message_pointer
-    bne @skip ; goto @skip if message_pointer has not changed to $00
-    lda message_pointer+1
-    inc
-    sta message_pointer+1
+    .repeat SCROLL_STEP
+    inc message_pointer
+    .endrepeat
+    bne @skip
+    inc message_pointer+1
 @skip:    
     rts
 
+
+; ----------------------------------------------- ;
 copy_text_to_screen:
 
     ; configure VRAM access with auto increment (step=2)
-    lda #$02
-    sta ADDRx_L
+    lda #$00
+    sta VERA::ADDRx_L
     lda #$eb
-    sta ADDRx_M
+    sta VERA::ADDRx_M
     lda #%00100001
-    sta ADDRx_H
+    sta VERA::ADDRx_H
 
     ldy #$00
 loop:
     lda (message_pointer),y
     cmp #$00
     beq reset_text_pointer
-    sta VDATA_0 
+    sta VERA::DATA0
     iny
-    cpy #80 ; text line length
-    beq end
-    jmp loop
+    cpy #80+SCROLL_STEP ; text line length
+    bne loop
 end:    
     rts
 
+
+; ----------------------------------------------- ;
 reset_text_pointer:
     ; set pointer to point the beggining of the message
     lda #<message
     sta message_pointer
     lda #>message
-    sta message_pointer+1
+    sta message_pointer+1    
+    rts
+
+
+; ----------------------------------------------- ;
+set_colors_of_offscreen_chars:
+    lda #$A1
+    sta VERA::ADDRx_L
+    lda #$EB
+    sta VERA::ADDRx_M
+    lda #%00000001
+    sta VERA::ADDRx_H
+    lda #%01100001 ; white char on blue background
+    sta VERA::DATA0
+
+    lda #$A3
+    sta VERA::ADDRx_L
+    lda #$EB
+    sta VERA::ADDRx_M
+    lda #%00000001
+    sta VERA::ADDRx_H
+    lda #%01100001 ; white char on blue background
+    sta VERA::DATA0
+
     rts
