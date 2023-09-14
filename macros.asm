@@ -13,10 +13,38 @@
 
 .endmacro
 
-; return from interrupt procedure
+; do nothing for #CYCLES cycles
+.macro super_nop CYCLES
+    lda #$00    ; 2 cycles
+:   inc         ; 2 cycles
+    cmp #CYCLES / 4 ; 2 cycles
+    bne :-      ; 2 + 1 cycles
+.endmacro
+
+.macro set_line_color COLOR
+    ; configure VRAM access with auto increment (step=2)
+    lda #$01
+    sta VERA::ADDRx_L
+    lda #$EB
+    sta VERA::ADDRx_M
+    lda #%00100001
+    sta VERA::ADDRx_H
+
+    lda #COLOR
+    ldy #$00
+:
+    sta VERA::DATA0
+    iny
+    cpy #80+SCROLL_STEP ; text line length
+    bne :-
+.endmacro
+
+; return from interrupt procedure to basic
 .macro rti2b
     jmp (default_irq_handler)
 .endmacro
+
+; return from interrupt procedure
 .macro rti2
     ply
     plx

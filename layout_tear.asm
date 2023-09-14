@@ -18,7 +18,7 @@ message:
 default_irq_handler: .addr $0000
 
 SCROLL_STEP = $02 ; number of characters (must be even number)
-IRQ_LINE = $D6
+IRQ_LINE = $D6-$08
 
 .segment "CODE"
 
@@ -26,6 +26,8 @@ IRQ_LINE = $D6
     jsr set_colors_of_offscreen_chars
     jsr copy_text_to_screen
     stz h_scroll
+    lda VERA::L0_CONFIG
+    sta VERA::L1_CONFIG
     jsr set_custom_irq_handler
     rts ; exit to basic
 
@@ -61,6 +63,9 @@ custom_irq_handler:
     cmp #IRQ_LINE
     bne odd_interrupt ; branch if it's not the line $1D6 
 
+    lda #%00010001
+    sta VERA::DC_VIDEO
+
     jsr scroll_text
 
     lda #%00000010 ; clear LINE interrupt status
@@ -76,6 +81,9 @@ custom_irq_handler:
 odd_interrupt:
     lda #$00
     stz VERA::L1_HSCROLL_L ; reset screen scroll
+
+    lda #%00100001
+    sta VERA::DC_VIDEO
 
     lda h_scroll
     cmp #$08 * SCROLL_STEP
@@ -107,11 +115,6 @@ scroll_text:
     inc
     inc
     sta h_scroll
-    ; ldy h_scale_index
-    ; .repeat 16
-    ; iny
-    ; .endrepeat
-    ; adc (h_scale_pointer), y
     sta VERA::L1_HSCROLL_L ;scroll screen 
 
     rts
@@ -140,7 +143,7 @@ copy_text_to_screen:
     ; configure VRAM access with auto increment (step=2)
     lda #$00
     sta VERA::ADDRx_L
-    lda #$eb
+    lda #$ea
     sta VERA::ADDRx_M
     lda #%00100001
     sta VERA::ADDRx_H
